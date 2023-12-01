@@ -23,5 +23,3 @@ else:
 
 
 SIMPLE_JWT['SIGNING_KEY'] = SECRET_KEY
-
-print("The installed_apps = ", INSTALLED_APPS)

@@ -18,9 +18,6 @@ from project_template.base import BaseManager
 
 
 class UserProfileManager(BaseManager):
-    """
-    Custom model manager for UserProfile
-    """
     def get_queryset(self, apply_filter=True):
         """
         overrides the default get_queryset

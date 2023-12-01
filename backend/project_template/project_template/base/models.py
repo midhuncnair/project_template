@@ -15,7 +15,6 @@ __maintainers__ = [
 ]
 
 
-
 import logging
 
 
@@ -31,13 +30,13 @@ class BaseQuerySetManager(models.query.QuerySet):
     """Overrides the django's default queryset
     to include custom logics for soft delete and purge
     """
-    def _soft_delete(self, request):
+    def _soft_delete(self, request_id):
         """does a soft delete
         """
-        if request is None:
+        if request_id is None:
             from project_template.request_utils.context import get_current_context
             try:
-                request = get_current_context()
+                request_id = get_current_context()
             except:
                 pass
 
@@ -65,31 +64,31 @@ class BaseQuerySetManager(models.query.QuerySet):
 
         collector = Collector(using=del_query.db)
         collector.collect(del_query)
-        deleted, _rows_count = collector.soft_delete(request)
+        deleted, _rows_count = collector.soft_delete(request_id)
 
         # Clear the result cache, in case this QuerySet gets reused.
         self._result_cache = None
         return deleted, _rows_count
 
-    def delete(self, is_soft=True, request=None):
+    def delete(self, is_soft=True, request_id=None):
         """overrides the default delete to be soft
         """
         if is_soft is False:
             super().delete()
         else:
-            self._soft_delete(request)
+            self._soft_delete(request_id)
 
     delete.alters_data = True
     delete.queryset_only = True
 
-    def undelete(self, request=None):
+    def undelete(self, request_id=None):
         """
         undo soft delete.
         """
-        if request is None:
+        if request_id is None:
             from project_template.request_utils.context import get_current_context
             try:
-                request = get_current_context()
+                request_id = get_current_context()
             except:
                 pass
 
@@ -117,7 +116,7 @@ class BaseQuerySetManager(models.query.QuerySet):
 
         collector = Collector(using=del_query.db)
         collector.collect(del_query)
-        deleted, _rows_count = collector.undo_soft_delete(request)
+        deleted, _rows_count = collector.undo_soft_delete(request_id)
 
         # Clear the result cache, in case this QuerySet gets reused.
         self._result_cache = None
@@ -244,16 +243,17 @@ class BaseAuditData(models.Model):
     time_updated = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
     remarks = models.TextField(default='', blank=True)
-
+    requests = models.ManyToManyField('appmanagement.RequestTracker')
+    objects = models.Manager()  # default
     raw_objects = models.Manager()
 
-    def _soft_delete(self, request):
+    def _soft_delete(self, request_id):
         """Performs a soft delete on the object and related objects
         """
-        if request is None:
+        if request_id is None:
             from project_template.request_utils.context import get_current_context
             try:
-                request = get_current_context()
+                request_id = get_current_context()
             except:
                 pass
 
@@ -266,57 +266,60 @@ class BaseAuditData(models.Model):
 
         collector = Collector(using=using)
         collector.collect([self])
-        collector.soft_delete(request)
+        collector.soft_delete(request_id)
 
-    def delete(self, is_soft=True, request=None):
+    def delete(self, is_soft=True, request_id=None):
         """
         overrides the model delete to set only
         is_active = False
         """
         if is_soft:
-            self._soft_delete(request)
+            self._soft_delete(request_id)
         else:
             super().delete()
 
-    def undelete(self, request=None):
+    def undelete(self, request_id=None):
         """Undoes the soft delete
         """
-        if request is None:
+        if request_id is None:
             from project_template.request_utils.context import get_current_context
             try:
-                request = get_current_context()
+                request_id = get_current_context()
             except:
                 pass
 
         using = router.db_for_write(self._meta.model, instance=self)
         assert self._get_pk_val()is not None, \
-            "%s object can't be deleted because its %s attribute is set to None." % (
+            "%s object can't be undeleted because its %s attribute is set to None." % (
                 self._meta.object_name,
                 self._meta.pk.attname
             )
 
         collector = Collector(using=using)
         collector.collect([self])
-        collector.undo_soft_delete(request)
+        collector.undo_soft_delete(request_id)
 
     def save(self, *args, **kwargs):
-        """
-        """
-        request = kwargs.get('request')
-        if request is None:
+        request_id = kwargs.get('request_id')
+        if request_id is None:
             from project_template.request_utils.context import get_current_context
             try:
-                request = get_current_context()
+                request_id = get_current_context()
             except:
                 pass
+        else:
+            del kwargs['request_id']
 
-        user = request.user.username if (request and request.user) else ''
-        self.remarks = '' if self.remarks is None  else '\n' + 'created/updated by ' + user
+        remarks = '' if self.remarks is None else self.remarks + '\n'
+        created_updated = 'Created' if self.pk is None else 'Updated'
+        self.remarks = f"{remarks}RequestId:{request_id} --> {created_updated}"
 
         if self.time_created is None:
             self.time_created = timezone.now()
 
         ret_data = super().save(*args, **kwargs)
+        self.refresh_from_db()
+        self.requests.add(request_id)
         return ret_data
 
     class Meta:

@@ -7,9 +7,9 @@
 
 
 __all__ = [
+    'get_request_tracker',
     'get_current_context',
     'set_current_context',
-    'DummyContext',
 ]
 __version__ = "1.0.0.0"
 __author__ = "Midhun C Nair <midhunch@gmail.com>"
@@ -18,51 +18,24 @@ __maintainers__ = [
 ]
 
 
-# from django.dispatch import Signal, receiver
-
-
 import logging
 import threading
+
+from appmanagement.models import RequestTracker
 
 
 logger = logging.getLogger(__name__)
 _thread_local = threading.local()
 
 
+def get_request_tracker(request_id):
+    c_request = RequestTracker.objects.get(request_id=request_id)
+    return c_request
+
+
 def get_current_context():
-    """
-    """
     return getattr(_thread_local, 'current_request', None)
 
 
-def set_current_context(request=None):
-    """
-    """
-    setattr(_thread_local, 'current_request', request)
-
-
-class DummyContext:
-    def __init__(self, request):
-        self.actual_request = request
-
-    @property
-    def user(self):
-        logger.critical(
-            "\nDummyContext.user: This is not supposed to be called the request is already served\n"
-        )
-        return self.actual_request.user
-
-    @property
-    def request_context(self):
-        logger.critical(
-            "\nDummyContext.request_context:This is not supposed to be called the request is already served\n"
-        )
-        return self.actual_request.request_context
-
-    def __getattr__(self, key):
-        """
-        """
-        logger.critical(
-            f"\nDummyContext.{key}: This is not supposed to be called the request is already served\n"
-        )
-        return getattr(self.actual_request, key)
+def set_current_context(request_id=None):
+    setattr(_thread_local, 'current_request', request_id)

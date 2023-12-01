@@ -44,10 +44,33 @@ class Collector(BaseCollector):
         )
         return user, apiPath
 
-    def soft_delete(self, request=None):
+    def query_update_batch(self, model, pk_list, update_data):
+        """
+        """
+        query = sql.UpdateQuery(model)
+        return query.update_batch(
+            pk_list,
+            update_data,
+            self.using
+        )
+
+    def compute_requests_through_model_n_data(self, model_obj, pk_list, request_id):
+        """
+        """
+        RequestsThroughModel = None
+        through_bulk_create = []
+        if hasattr(model_obj, 'requests'):
+            RequestsThroughModel = model_obj.requests.through
+            through_bulk_create = [
+                RequestsThroughModel(pk, request_id=request_id)
+                for pk in pk_list
+            ]
+
+        return RequestsThroughModel, through_bulk_create
+
+    def soft_delete(self, request_id):
         """soft delete the records and also add the user who deleted it.
         """
-        user, apiPath = self.get_user_api_path(request)
 
         for model, instances in self.data.items():
             self.data[model] = sorted(instances, key=attrgetter("pk"))
@@ -65,14 +88,18 @@ class Collector(BaseCollector):
             if self.can_fast_delete(instance):
                 if hasattr(instance, 'is_active') and instance.is_active == True:
                     with transaction.mark_for_rollback_on_error(self.using):
-                        count = sql.UpdateQuery(model).update_batch(
-                            [instance.pk],
-                            {
+                        remarks = '' if instance.remarks is None else instance.remarks + '\n'
+                        remarks += f"RequestId:{request_id} --> SoftDelete"
+                        count = self.query_update_batch(
+                            model,
+                            pk_list=[instance.pk],
+                            update_data={
                                 'is_active': False,
-                                'remarks': instance.remarks + '\n' + "Deleted by " + str(user) + "As Part of '" + apiPath + "'"
-                            },
-                            self.using
+                                'remarks': remarks
+                            }
                         )
+                        if hasattr(instance, 'requests'):
+                            instance.requests.add(request_id)
                     # setattr(instance, model._meta.pk.attname, None)
                     return count, {model._meta.label: count}
                 else:
@@ -85,8 +112,10 @@ class Collector(BaseCollector):
                     for instance in qs:
                         try:
                             if hasattr(instance, 'is_active') and instance.is_active == True:
+                                remarks = '' if instance.remarks is None else instance.remarks + '\n'
+                                remarks += f"RequestId:{request_id} --> SoftDelete"
                                 instance.is_active = False
-                                instance.remarks += '\n' + "Deleted by " + str(user) + "As Part of '" + apiPath + "'"
+                                instance.remarks = remarks
                                 instance.save()
                                 deleted_counter[qs.model._meta.label] += 1
                         except FieldDoesNotExist:
@@ -96,20 +125,33 @@ class Collector(BaseCollector):
             for model, instances in self.data.items():
                 try:
                     model._meta.get_field('is_active')  # will throw error if field doesn't exist.
-                    query = sql.UpdateQuery(model)
                     pk_list = [obj.pk for obj in instances if obj.is_active is True]
-                    count = query.update_batch(
-                        pk_list,
-                        {
+
+                    count = self.query_update_batch(
+                        model,
+                        pk_list=pk_list,
+                        update_data={
                             'is_active': False,
                             'remarks': Concat(
                                 'remarks',
-                                V('\nDeleted by ' + str(user) + "As Part of '" + apiPath + "'"),
+                                V(f'\nRequestId:{request_id} --> SoftDelete'),
                                 output_field=TextField()
                             )
-                        },
-                        self.using
+                        }
                     )
+                    RequestsThroughModel, through_bulk_create = (
+                        self.compute_requests_through_model_n_data(
+                            instances[0],
+                            pk_list=pk_list,
+                            request_id=request_id
+                        )
+                    )
+                    if (
+                            RequestsThroughModel is not None
+                            and len(through_bulk_create) > 0  # this should be true if count>0
+                        ):
+                            RequestsThroughModel.objects.bulk_create(through_bulk_create)
+
                     if count:
                         deleted_counter[model._meta.label] += count
 
@@ -118,10 +160,9 @@ class Collector(BaseCollector):
 
         return sum(deleted_counter.values()), dict(deleted_counter)
 
-    def undo_soft_delete(self, request=None):
+    def undo_soft_delete(self, request_id):
         """undoes the soft delete of the records and also add the user who undeleted it.
         """
-        user, apiPath = self.get_user_api_path(request)
         # sort instance collections
         for model, instances in self.data.items():
             self.data[model] = sorted(instances, key=attrgetter("pk"))
@@ -139,13 +180,15 @@ class Collector(BaseCollector):
             if self.can_fast_delete(instance):
                 if hasattr(instance, 'is_active') and instance.is_active == False:
                     with transaction.mark_for_rollback_on_error(self.using):
-                        count = sql.UpdateQuery(model).update_batch(
-                            [instance.pk],
-                            {
+                        remarks = '' if instance.remarks is None else instance.remarks + '\n'
+                        remarks += f"RequestId:{request_id} --> UndoSoftDelete"
+                        count = self.query_update_batch(
+                            model,
+                            pk_list=[instance.pk],
+                            update_data={
                                 'is_active': True,
-                                'remarks': instance.remarks + '\n' + "UnDeleted by " + str(user) + "As Part of '" + apiPath + "'"
-                            },
-                            self.using
+                                'remarks': remarks,
+                            }
                         )
                     # setattr(instance, model._meta.pk.attname, None)
                     return count, {model._meta.label: count}
@@ -159,9 +202,11 @@ class Collector(BaseCollector):
                     for instance in qs:
                         try:
                             if hasattr(instance, 'is_active') and instance.is_active == False:
+                                remarks = '' if instance.remarks is None else instance.remarks + '\n'
+                                remarks += f"RequestId:{request_id} --> UndoSoftDelete"
                                 instance.is_active = True
+                                instance.remarks = remarks
                                 instance.save()
-                                instance.remarks += '\n' + "UnDeleted by " + str(user) + "As Part of '" + apiPath + "'"
                                 deleted_counter[qs.model._meta.label] += 1
                         except FieldDoesNotExist:
                             pass
@@ -170,20 +215,32 @@ class Collector(BaseCollector):
             for model, instances in self.data.items():
                 try:
                     model._meta.get_field('is_active')  # will throw error if field doesn't exist.
-                    query = sql.UpdateQuery(model)
                     pk_list = [obj.pk for obj in instances if obj.is_active is False]
-                    count = query.update_batch(
-                        pk_list,
-                        {
+                    count = self.query_update_batch(
+                        model,
+                        pk_list=pk_list,
+                        update_data={
                             'is_active': True,
                             'remarks': Concat(
                                 'remarks',
-                                V('\nUnDeleted by ' + str(user) + "As Part of '" + apiPath + "'"),
+                                V(f'\nRequestId:{request_id} --> UndoSoftDelete'),
                                 output_field=TextField()
                             )
-                        },
-                        self.using
+                        }
                     )
+                    RequestsThroughModel, through_bulk_create = (
+                        self.compute_requests_through_model_n_data(
+                            instances[0],
+                            pk_list=pk_list,
+                            request_id=request_id
+                        )
+                    )
+                    if (
+                            RequestsThroughModel is not None
+                            and len(through_bulk_create) > 0  # this should be true if count>0
+                        ):
+                            RequestsThroughModel.objects.bulk_create(through_bulk_create)
+
                     if count:
                         deleted_counter[model._meta.label] += count
 

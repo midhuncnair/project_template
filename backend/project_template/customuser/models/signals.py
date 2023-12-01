@@ -59,6 +59,14 @@ def create_user_profile(sender, instance, created=False, **kwargs):
     dispatch_uid="User:lowercase_user_username"
 )
 def lowercase_user_username(sender, instance, created=False, **kwargs):
+    changed = False
     if not instance.username.islower():
         instance.username = instance.username.lower()
+        changed = True
+
+    if not instance.email.islower():
+        instance.email = instance.email.lower()
+        changed = True
+
+    if changed:
         instance.save()

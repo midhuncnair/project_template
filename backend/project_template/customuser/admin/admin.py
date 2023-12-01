@@ -30,8 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 class UserProfileAdmin(BaseModelAdmin):
-    """
-    """
     def user_id(self, obj):
         return obj.user.pk
 
@@ -51,8 +49,6 @@ class UserProfileAdmin(BaseModelAdmin):
 
 
 class ForgotPasswordRequestsAdmin(BaseModelAdmin):
-    """
-    """
     list_display = ('pk', 'user', 'request_id', 'is_satisfied', 'is_expired', 'is_valid')
 
 

@@ -40,10 +40,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'appmanagement',
     'customuser',
 ]
 
 MIDDLEWARE = [
+    'project_template.core.middlewares.RequestTimeProfilerMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -51,6 +53,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'project_template.request_utils.middlewares.ContextMiddleware',
+    'project_template.core.middlewares.ExceptionMiddleware',
 ]
 
 ROOT_URLCONF = 'project_template.urls'

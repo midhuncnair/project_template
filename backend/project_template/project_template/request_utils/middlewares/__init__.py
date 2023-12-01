@@ -1,5 +1,5 @@
 #! /usr/bin/env python
-"""Base modules and classes
+"""init of middlewares for request_utils
 """
 
 
@@ -11,9 +11,4 @@ __maintainers__ = [
 ]
 
 
-from .collector import *
-from .admin import *
-from .models import *
-from .views import *
-from .permissions import *
-from .utils import *
+from .context_middleware import *
