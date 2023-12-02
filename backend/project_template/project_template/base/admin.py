@@ -38,9 +38,15 @@ class BaseModelAdmin(admin.ModelAdmin):
     def undo_soft_delete(self, request, queryset):
         """
         """
-        collector = Collector(using=queryset.db)
-        collector.collect(queryset.filter(is_active=False))
-        collector.undo_soft_delete(request)
+        pks = queryset.values_list('pk', flat=True)
+        n_queryset = self.model.objects.filter(
+            pk__in=pks,
+            __include_deleted=True
+        )
+        n_queryset.undelete(request_id=request._request_id)
+        # collector = Collector(using=queryset.db)
+        # collector.collect(queryset.filter(is_active=False))
+        # collector.undo_soft_delete(request._request_id)
 
         # Clear the result cache, in case this QuerySet gets reused.
         self._result_cache = None
@@ -48,7 +54,7 @@ class BaseModelAdmin(admin.ModelAdmin):
     def soft_delete(self, request, queryset):
         pks = queryset.values_list('pk', flat=True)
         n_queryset = self.model.objects.filter(pk__in=pks)
-        n_queryset.delete(request)
+        n_queryset.delete(request_id=request._request_id)
 
         # Clear the result cache, in case this QuerySet gets reused.
         self._result_cache = None
